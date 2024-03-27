@@ -2,17 +2,21 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
+	"time"
 
-	corev2 "github.com/sensu/sensu-go/api/core/v2"
+	corev2 "github.com/sensu/core/v2"
 	"github.com/sensu/sensu-plugin-sdk/sensu"
 )
 
 // Config represents the check plugin config.
 type Config struct {
 	sensu.PluginConfig
-	Example string
+	Onion string
 }
 
 var (
@@ -26,15 +30,15 @@ var (
 
 	options = []sensu.ConfigOption{
 		&sensu.PluginConfigOption[string]{
-			Path:      "example",
-			Env:       "CHECK_EXAMPLE",
-			Argument:  "example",
-			Shorthand: "e",
-			Default:   "",
-			Usage:     "An example string configuration option",
-			Value:     &plugin.Example,
+			Path:      "onion",
+			Env:       "CHECK_ONION",
+			Argument:  "onion",
+			Shorthand: "o",
+			Usage:     "Onion address to check",
+			Value:     &plugin.Onion,
 		},
 	}
+	torProxy string = "socks5://127.0.0.1:9050" // 9150 w/ Tor Browser
 )
 
 func main() {
@@ -55,13 +59,46 @@ func main() {
 }
 
 func checkArgs(event *corev2.Event) (int, error) {
-	if len(plugin.Example) == 0 {
-		return sensu.CheckStateWarning, fmt.Errorf("--example or CHECK_EXAMPLE environment variable is required")
+	if len(plugin.Onion) == 0 {
+		return sensu.CheckStateWarning, fmt.Errorf("onion address is required")
 	}
 	return sensu.CheckStateOK, nil
 }
 
 func executeCheck(event *corev2.Event) (int, error) {
-	log.Println("executing check with --example", plugin.Example)
+	// Thanks to https://www.devdungeon.com/content/making-tor-http-requests-go
+
+	// Parse Tor proxy URL string to a URL type
+	torProxyUrl, err := url.Parse(torProxy)
+	if err != nil {
+		fmt.Printf("error parsing Tor proxy URL(%s): %s", torProxy, err)
+		return sensu.CheckStateCritical, nil
+	}
+
+	// Set up a custom HTTP transport to use the proxy and create the client
+	torTransport := &http.Transport{Proxy: http.ProxyURL(torProxyUrl)}
+	client := &http.Client{Transport: torTransport, Timeout: time.Second * 30}
+
+	// Make request
+	resp, err := client.Get(plugin.Onion)
+	if err != nil {
+		fmt.Printf("error making GET request: %s", err)
+		return sensu.CheckStateCritical, nil
+	}
+	defer resp.Body.Close()
+
+	// Expect only 200
+	if resp.StatusCode != 200 {
+		fmt.Printf("%s return status code: %v", plugin.Onion, resp.StatusCode)
+		return sensu.CheckStateCritical, nil
+	}
+
+	// Read response
+	_, err = io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("error reading body of response: %s", err)
+		return sensu.CheckStateCritical, nil
+	}
+	fmt.Printf("%s return status code: %v", plugin.Onion, resp.StatusCode)
 	return sensu.CheckStateOK, nil
 }
