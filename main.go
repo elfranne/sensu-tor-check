@@ -85,8 +85,9 @@ func executeCheck(event *corev2.Event) (int, error) {
 		fmt.Printf("error making GET request: %s", err)
 		return sensu.CheckStateCritical, nil
 	}
-	defer resp.Body.Close()
-
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	// Expect only 200
 	if resp.StatusCode != 200 {
 		fmt.Printf("%s return status code: %v", plugin.Onion, resp.StatusCode)
