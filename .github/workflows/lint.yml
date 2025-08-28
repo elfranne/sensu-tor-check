@@ -6,6 +6,8 @@ jobs:
   test:
     name: Lint
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       matrix:
         os: [ubuntu-latest]
