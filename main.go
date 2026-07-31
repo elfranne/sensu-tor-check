@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	corev2 "github.com/sensu/core/v2"
@@ -59,8 +60,23 @@ func main() {
 }
 
 func checkArgs(event *corev2.Event) (int, error) {
+	// A bad address is a configuration issue, not a service failure: report
+	// unknown so it is not mistaken for the onion service being down.
 	if len(plugin.Onion) == 0 {
-		return sensu.CheckStateWarning, fmt.Errorf("onion address is required")
+		return sensu.CheckStateUnknown, fmt.Errorf("onion address is required")
+	}
+	onionUrl, err := url.Parse(plugin.Onion)
+	if err != nil {
+		return sensu.CheckStateUnknown, fmt.Errorf("onion address %q is not a valid URL: %s", plugin.Onion, err)
+	}
+	if onionUrl.Scheme != "http" && onionUrl.Scheme != "https" {
+		return sensu.CheckStateUnknown, fmt.Errorf("onion address must start with http:// or https://, got %q", plugin.Onion)
+	}
+	if onionUrl.Host == "" {
+		return sensu.CheckStateUnknown, fmt.Errorf("onion address %q has no host", plugin.Onion)
+	}
+	if !strings.HasSuffix(strings.ToLower(onionUrl.Hostname()), ".onion") {
+		return sensu.CheckStateUnknown, fmt.Errorf("onion address host must end in .onion, got %q", onionUrl.Hostname())
 	}
 	return sensu.CheckStateOK, nil
 }
@@ -72,7 +88,7 @@ func executeCheck(event *corev2.Event) (int, error) {
 	torProxyUrl, err := url.Parse(torProxy)
 	if err != nil {
 		fmt.Printf("error parsing Tor proxy URL(%s): %s", torProxy, err)
-		return sensu.CheckStateCritical, nil
+		return sensu.CheckStateUnknown, nil
 	}
 
 	// Set up a custom HTTP transport to use the proxy and create the client
