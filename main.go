@@ -113,8 +113,9 @@ func executeCheck(event *corev2.Event) (int, error) {
 		return sensu.CheckStateCritical, nil
 	}
 
-	// Read response
-	_, err = io.ReadAll(resp.Body)
+	// Drain the response to confirm the body transfers, without buffering a
+	// remote-controlled amount of data just to discard it.
+	_, err = io.Copy(io.Discard, resp.Body)
 	if err != nil {
 		fmt.Printf("error reading body of response: %s\n", err)
 		return sensu.CheckStateCritical, nil
