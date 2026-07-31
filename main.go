@@ -18,6 +18,7 @@ import (
 type Config struct {
 	sensu.PluginConfig
 	Onion   string
+	Proxy   string
 	Timeout int
 }
 
@@ -39,6 +40,15 @@ var (
 			Usage:     "Onion address to check",
 			Value:     &plugin.Onion,
 		},
+		&sensu.PluginConfigOption[string]{
+			Path:      "proxy",
+			Env:       "CHECK_PROXY",
+			Argument:  "proxy",
+			Shorthand: "p",
+			Default:   "socks5://127.0.0.1:9050",
+			Usage:     "Tor proxy to connect through (9150 w/ Tor Browser)",
+			Value:     &plugin.Proxy,
+		},
 		&sensu.PluginConfigOption[int]{
 			Path:      "timeout",
 			Env:       "CHECK_TIMEOUT",
@@ -49,7 +59,9 @@ var (
 			Value:     &plugin.Timeout,
 		},
 	}
-	torProxy string = "socks5://127.0.0.1:9050" // 9150 w/ Tor Browser
+	// Parsed and validated by checkArgs, which the SDK runs before
+	// executeCheck.
+	torProxyUrl *url.URL
 )
 
 func main() {
@@ -99,16 +111,31 @@ func checkArgs(event *corev2.Event) (int, error) {
 	if plugin.Timeout <= 0 {
 		return sensu.CheckStateUnknown, fmt.Errorf("timeout must be greater than zero, got %d", plugin.Timeout)
 	}
+	proxyUrl, err := url.Parse(plugin.Proxy)
+	if err != nil {
+		return sensu.CheckStateUnknown, fmt.Errorf("proxy %q is not a valid URL: %s", plugin.Proxy, err)
+	}
+	// http.Transport understands these four; tor serves socks5 on SocksPort
+	// and http on HTTPTunnelPort.
+	switch proxyUrl.Scheme {
+	case "socks5", "socks5h", "http", "https":
+	default:
+		return sensu.CheckStateUnknown, fmt.Errorf("proxy scheme must be socks5, socks5h, http or https, got %q", plugin.Proxy)
+	}
+	if proxyUrl.Host == "" {
+		return sensu.CheckStateUnknown, fmt.Errorf("proxy %q has no host", plugin.Proxy)
+	}
+	torProxyUrl = proxyUrl
 	return sensu.CheckStateOK, nil
 }
 
 func executeCheck(event *corev2.Event) (int, error) {
 	// Thanks to https://www.devdungeon.com/content/making-tor-http-requests-go
 
-	// Parse Tor proxy URL string to a URL type
-	torProxyUrl, err := url.Parse(torProxy)
-	if err != nil {
-		fmt.Printf("error parsing Tor proxy URL(%s): %s\n", torProxy, err)
+	// http.ProxyURL(nil) would quietly connect direct, checking the address
+	// outside Tor, so refuse to run rather than trust that checkArgs ran.
+	if torProxyUrl == nil {
+		fmt.Print("no Tor proxy configured\n")
 		return sensu.CheckStateUnknown, nil
 	}
 
