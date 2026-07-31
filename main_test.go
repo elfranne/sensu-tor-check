@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"testing"
 
 	"github.com/sensu/sensu-plugin-sdk/sensu"
@@ -86,6 +87,55 @@ func TestCheckArgsTimeout(t *testing.T) {
 				t.Errorf("checkArgs(timeout %d) returned no error, want one", c.timeout)
 			}
 		})
+	}
+}
+
+func TestExecuteCheckProxyUnreachable(t *testing.T) {
+	restoreConfig(t)
+
+	// Take a loopback port and hand it straight back, so connecting to it is
+	// refused rather than left hanging.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("could not reserve a port: %v", err)
+	}
+	addr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("could not release the port: %v", err)
+	}
+
+	plugin.Onion = "http://abcdef.onion"
+	plugin.Timeout = 5
+
+	for _, scheme := range []string{"socks5", "http"} {
+		t.Run(scheme, func(t *testing.T) {
+			plugin.Proxy = scheme + "://" + addr
+			if status, err := checkArgs(nil); status != sensu.CheckStateOK {
+				t.Fatalf("checkArgs() = %v (err: %v), want %v", status, err, sensu.CheckStateOK)
+			}
+			status, err := executeCheck(nil)
+			if status != sensu.CheckStateUnknown {
+				t.Errorf("executeCheck() with a dead proxy = %v (err: %v), want %v", status, err, sensu.CheckStateUnknown)
+			}
+			if err != nil {
+				t.Errorf("executeCheck() returned unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestExecuteCheckWithoutProxy(t *testing.T) {
+	restoreConfig(t)
+	plugin.Onion = "http://abcdef.onion"
+	plugin.Timeout = 5
+	torProxyUrl = nil
+
+	status, err := executeCheck(nil)
+	if status != sensu.CheckStateUnknown {
+		t.Errorf("executeCheck() with no proxy = %v (err: %v), want %v", status, err, sensu.CheckStateUnknown)
+	}
+	if err != nil {
+		t.Errorf("executeCheck() returned unexpected error: %v", err)
 	}
 }
 

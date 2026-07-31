@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -146,6 +148,14 @@ func executeCheck(event *corev2.Event) (int, error) {
 	// Make request
 	resp, err := client.Get(plugin.Onion)
 	if err != nil {
+		// Failing to reach the proxy itself says nothing about the onion
+		// service: the local tor daemon is down, so report unknown rather
+		// than page someone about a service that was never contacted.
+		var opErr *net.OpError
+		if errors.As(err, &opErr) && opErr.Op == "proxyconnect" {
+			fmt.Printf("error connecting to Tor proxy %s: %s\n", plugin.Proxy, err)
+			return sensu.CheckStateUnknown, nil
+		}
 		fmt.Printf("error making GET request: %s\n", err)
 		return sensu.CheckStateCritical, nil
 	}
