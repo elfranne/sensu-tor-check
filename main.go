@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -78,7 +77,6 @@ func main() {
 	}
 	//Check the Mode bitmask for Named Pipe to indicate stdin is connected
 	if fi.Mode()&os.ModeNamedPipe != 0 {
-		log.Println("using stdin")
 		useStdin = true
 	}
 
