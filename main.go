@@ -78,8 +78,11 @@ func checkArgs(event *corev2.Event) (int, error) {
 	if onionUrl.Host == "" {
 		return sensu.CheckStateUnknown, fmt.Errorf("onion address %q has no host", plugin.Onion)
 	}
-	if !strings.HasSuffix(strings.ToLower(onionUrl.Hostname()), ".onion") {
-		return sensu.CheckStateUnknown, fmt.Errorf("onion address host must end in .onion, got %q", onionUrl.Hostname())
+	// A bare ".onion" (or one preceded by an empty label) carries the suffix
+	// but names no service, so require something in front of it.
+	service, ok := strings.CutSuffix(strings.ToLower(onionUrl.Hostname()), ".onion")
+	if !ok || service == "" || strings.HasSuffix(service, ".") {
+		return sensu.CheckStateUnknown, fmt.Errorf("onion address host must be a name ending in .onion, got %q", onionUrl.Hostname())
 	}
 	return sensu.CheckStateOK, nil
 }
