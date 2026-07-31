@@ -87,7 +87,7 @@ func executeCheck(event *corev2.Event) (int, error) {
 	// Parse Tor proxy URL string to a URL type
 	torProxyUrl, err := url.Parse(torProxy)
 	if err != nil {
-		fmt.Printf("error parsing Tor proxy URL(%s): %s", torProxy, err)
+		fmt.Printf("error parsing Tor proxy URL(%s): %s\n", torProxy, err)
 		return sensu.CheckStateUnknown, nil
 	}
 
@@ -98,24 +98,23 @@ func executeCheck(event *corev2.Event) (int, error) {
 	// Make request
 	resp, err := client.Get(plugin.Onion)
 	if err != nil {
-		fmt.Printf("error making GET request: %s", err)
+		fmt.Printf("error making GET request: %s\n", err)
 		return sensu.CheckStateCritical, nil
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
+	fmt.Printf("%s return status code: %v\n", plugin.Onion, resp.StatusCode)
 	// Expect only 200
-	if resp.StatusCode != 200 {
-		fmt.Printf("%s return status code: %v", plugin.Onion, resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
 		return sensu.CheckStateCritical, nil
 	}
 
 	// Read response
 	_, err = io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Printf("error reading body of response: %s", err)
+		fmt.Printf("error reading body of response: %s\n", err)
 		return sensu.CheckStateCritical, nil
 	}
-	fmt.Printf("%s return status code: %v", plugin.Onion, resp.StatusCode)
 	return sensu.CheckStateOK, nil
 }
