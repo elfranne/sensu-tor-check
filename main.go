@@ -17,7 +17,8 @@ import (
 // Config represents the check plugin config.
 type Config struct {
 	sensu.PluginConfig
-	Onion string
+	Onion   string
+	Timeout int
 }
 
 var (
@@ -37,6 +38,15 @@ var (
 			Shorthand: "o",
 			Usage:     "Onion address to check",
 			Value:     &plugin.Onion,
+		},
+		&sensu.PluginConfigOption[int]{
+			Path:      "timeout",
+			Env:       "CHECK_TIMEOUT",
+			Argument:  "timeout",
+			Shorthand: "t",
+			Default:   60,
+			Usage:     "Seconds to wait for the request to complete",
+			Value:     &plugin.Timeout,
 		},
 	}
 	torProxy string = "socks5://127.0.0.1:9050" // 9150 w/ Tor Browser
@@ -84,6 +94,11 @@ func checkArgs(event *corev2.Event) (int, error) {
 	if !ok || service == "" || strings.HasSuffix(service, ".") {
 		return sensu.CheckStateUnknown, fmt.Errorf("onion address host must be a name ending in .onion, got %q", onionUrl.Hostname())
 	}
+	// http.Client treats a non-positive timeout as no timeout at all, which
+	// would leave the check hanging until the agent kills it.
+	if plugin.Timeout <= 0 {
+		return sensu.CheckStateUnknown, fmt.Errorf("timeout must be greater than zero, got %d", plugin.Timeout)
+	}
 	return sensu.CheckStateOK, nil
 }
 
@@ -99,7 +114,7 @@ func executeCheck(event *corev2.Event) (int, error) {
 
 	// Set up a custom HTTP transport to use the proxy and create the client
 	torTransport := &http.Transport{Proxy: http.ProxyURL(torProxyUrl)}
-	client := &http.Client{Transport: torTransport, Timeout: time.Second * 30}
+	client := &http.Client{Transport: torTransport, Timeout: time.Duration(plugin.Timeout) * time.Second}
 
 	// Make request
 	resp, err := client.Get(plugin.Onion)
