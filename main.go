@@ -86,6 +86,29 @@ func main() {
 	check.Execute()
 }
 
+// isOnionHost reports whether host names an onion service. A bare ".onion"
+// (or one preceded by an empty label) carries the suffix but names nothing,
+// so something has to sit in front of it.
+func isOnionHost(host string) bool {
+	service, ok := strings.CutSuffix(strings.ToLower(host), ".onion")
+	return ok && service != "" && !strings.HasSuffix(service, ".")
+}
+
+// checkRedirect keeps the check pointed at onion services. Following a
+// redirect off .onion would leave the check reporting on whatever it landed
+// on -- a clearnet page can answer 200 while the onion service it replaced is
+// gone. Setting this also replaces net/http's default hop limit, so the limit
+// is reimposed here.
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	if !isOnionHost(req.URL.Hostname()) {
+		return fmt.Errorf("refusing redirect to non-onion host %q", req.URL.Hostname())
+	}
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	return nil
+}
+
 func checkArgs(event *corev2.Event) (int, error) {
 	// A bad address is a configuration issue, not a service failure: report
 	// unknown so it is not mistaken for the onion service being down.
@@ -102,10 +125,7 @@ func checkArgs(event *corev2.Event) (int, error) {
 	if onionUrl.Host == "" {
 		return sensu.CheckStateUnknown, fmt.Errorf("onion address %q has no host", plugin.Onion)
 	}
-	// A bare ".onion" (or one preceded by an empty label) carries the suffix
-	// but names no service, so require something in front of it.
-	service, ok := strings.CutSuffix(strings.ToLower(onionUrl.Hostname()), ".onion")
-	if !ok || service == "" || strings.HasSuffix(service, ".") {
+	if !isOnionHost(onionUrl.Hostname()) {
 		return sensu.CheckStateUnknown, fmt.Errorf("onion address host must be a name ending in .onion, got %q", onionUrl.Hostname())
 	}
 	// http.Client treats a non-positive timeout as no timeout at all, which
@@ -143,7 +163,11 @@ func executeCheck(event *corev2.Event) (int, error) {
 
 	// Set up a custom HTTP transport to use the proxy and create the client
 	torTransport := &http.Transport{Proxy: http.ProxyURL(torProxyUrl)}
-	client := &http.Client{Transport: torTransport, Timeout: time.Duration(plugin.Timeout) * time.Second}
+	client := &http.Client{
+		Transport:     torTransport,
+		Timeout:       time.Duration(plugin.Timeout) * time.Second,
+		CheckRedirect: checkRedirect,
+	}
 
 	// Make request
 	resp, err := client.Get(plugin.Onion)

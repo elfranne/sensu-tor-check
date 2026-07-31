@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/sensu/sensu-plugin-sdk/sensu"
@@ -87,6 +90,64 @@ func TestCheckArgsTimeout(t *testing.T) {
 				t.Errorf("checkArgs(timeout %d) returned no error, want one", c.timeout)
 			}
 		})
+	}
+}
+
+func TestCheckRedirect(t *testing.T) {
+	cases := []struct {
+		target string
+		hops   int
+		wantOK bool
+	}{
+		{"http://abcdef.onion/", 1, true},
+		{"https://abcdef.onion/login", 3, true},
+		{"http://other.onion/", 1, true},
+		{"http://www.abcdef.onion/", 1, true},
+		{"http://example.com/", 1, false},
+		{"http://abcdef.onion.example.com/", 1, false},
+		{"http://.onion/", 1, false},
+		// The hop limit net/http would have applied by default.
+		{"http://abcdef.onion/", 10, false},
+	}
+
+	for _, c := range cases {
+		t.Run(fmt.Sprintf("%s/%d", c.target, c.hops), func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, c.target, nil)
+			if err != nil {
+				t.Fatalf("could not build request: %v", err)
+			}
+			err = checkRedirect(req, make([]*http.Request, c.hops))
+			if c.wantOK && err != nil {
+				t.Errorf("checkRedirect(%q, %d hops) = %v, want nil", c.target, c.hops, err)
+			}
+			if !c.wantOK && err == nil {
+				t.Errorf("checkRedirect(%q, %d hops) = nil, want an error", c.target, c.hops)
+			}
+		})
+	}
+}
+
+// The policy has to hold when net/http drives it, not just when called
+// directly, so serve a redirect off .onion and confirm the client refuses it.
+func TestCheckRedirectViaClient(t *testing.T) {
+	clearnet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "should never be reached")
+	}))
+	defer clearnet.Close()
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, clearnet.URL, http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	client := &http.Client{CheckRedirect: checkRedirect}
+	resp, err := client.Get(redirector.URL)
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatalf("client followed a redirect to %s, want it refused", clearnet.URL)
+	}
+	if !strings.Contains(err.Error(), "refusing redirect") {
+		t.Errorf("client.Get() = %v, want a refused-redirect error", err)
 	}
 }
 
