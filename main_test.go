@@ -131,7 +131,7 @@ func TestCheckRedirect(t *testing.T) {
 // directly, so serve a redirect off .onion and confirm the client refuses it.
 func TestCheckRedirectViaClient(t *testing.T) {
 	clearnet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "should never be reached")
+		_, _ = fmt.Fprint(w, "should never be reached")
 	}))
 	defer clearnet.Close()
 
