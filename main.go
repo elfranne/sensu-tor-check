@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -69,14 +70,12 @@ func main() {
 	useStdin := false
 	fi, err := os.Stdin.Stat()
 	if err != nil {
-		// Without stdin the event cannot be read, so annotation overrides
-		// would be silently skipped: report unknown rather than check a
-		// possibly stale address.
-		fmt.Printf("error checking stdin: %v\n", err)
-		os.Exit(sensu.CheckStateUnknown)
+		fmt.Printf("Error check stdin: %v\n", err)
+		panic(err)
 	}
 	//Check the Mode bitmask for Named Pipe to indicate stdin is connected
 	if fi.Mode()&os.ModeNamedPipe != 0 {
+		log.Println("using stdin")
 		useStdin = true
 	}
 
